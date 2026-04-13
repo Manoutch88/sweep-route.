@@ -17,6 +17,9 @@ from sr_core import (
     _RE_SAFE_NAME, WORK_START
 )
 
+# ==========================================================
+# CONNEXION GOOGLE SHEETS
+# ==========================================================
 def get_gsheets_conn():
     try:
         return st.connection("gsheets", type=GSheetsConnection)
@@ -24,6 +27,9 @@ def get_gsheets_conn():
         st.error(f"Erreur connexion Google Sheets: {e}")
         return None
 
+# ==========================================================
+# HISTORY MANAGER
+# ==========================================================
 class HistoryManager:
     @staticmethod
     def save_to_file():
@@ -54,6 +60,9 @@ class HistoryManager:
         if not only_history:
             ContactManager.delete_contact_by_key(_norm_addr(address), _norm_addr(name))
 
+# ==========================================================
+# CONTACT MANAGER
+# ==========================================================
 class ContactManager:
     @staticmethod
     def build_index():
@@ -122,8 +131,7 @@ class ContactManager:
         else:
             nn, na = _norm_addr(name), _norm_addr(address)
             for i, c in enumerate(book):
-                if i != exclude_index and _norm_addr(c.get("name","")) == nn and _norm_addr(c.get("address","")) == na:
-                    return i
+                if i != exclude_index and _norm_addr(c.get("name","")) == nn and _norm_addr(c.get("address","")) == na: return i
         return None
 
     @staticmethod
@@ -161,6 +169,9 @@ class ContactManager:
             if m: cities.add(re.sub(r'\s+', ' ', m.group(0).strip().upper()))
         return sorted(list(cities))
 
+# ==========================================================
+# ADDRESS BOOK MANAGER (GOOGLE SHEETS)
+# ==========================================================
 class AddressBookManager:
     SHEET_NAME = "Contacts"
 
@@ -176,7 +187,7 @@ class AddressBookManager:
         if not conn: return 0
         try:
             df = conn.read(worksheet=AddressBookManager.SHEET_NAME, ttl=0)
-            if df.empty: return 0
+            if df is None or df.empty: return 0
             contacts = []
             for _, row in df.iterrows():
                 c = {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
@@ -205,10 +216,14 @@ class AddressBookManager:
             for c in contacts:
                 row = dict(c)
                 row["visit_date"] = ", ".join(sorted(row.get("visit_dates", []), key=_sort_key_date))
+                if "visit_dates" in row: del row["visit_dates"]
                 rows.append(row)
             df = pd.DataFrame(rows)
             cols = ["visit_date", "name", "address", "notes", "intervention_type", "service_duration", "phone"]
-            others = [col for col in df.columns if col not in cols and col != "visit_dates"]
+            # S'assurer que les colonnes existent
+            for col in cols:
+                if col not in df.columns: df[col] = ""
+            others = [col for col in df.columns if col not in cols]
             df = df[cols + others]
             conn.update(worksheet=AddressBookManager.SHEET_NAME, data=df)
             st.session_state["_book_dirty"] = False
@@ -222,58 +237,4 @@ class AddressBookManager:
         contacts = st.session_state.get("address_book", [])
         output = io.StringIO()
         writer = csv.writer(output, delimiter=';')
-        writer.writerow(["visit_date", "name", "address", "notes", "intervention_type", "service_duration", "phone"])
-        for c in contacts:
-            vd = ", ".join(sorted(c.get("visit_dates", []), key=_sort_key_date))
-            writer.writerow([vd, c.get("name",""), c.get("address",""), c.get("notes",""),
-                             c.get("intervention_type",""), c.get("service_duration",2700)//60, c.get("phone","")])
-        return output.getvalue().encode('utf-8-sig')
-
-    @staticmethod
-    def import_from_csv(content: str):
-        try:
-            lines = [l for l in content.splitlines() if l.strip()]
-            reader = csv.DictReader(io.StringIO("\n".join(lines)), delimiter=';' if ';' in lines[0] else ',')
-            book = st.session_state.get("address_book", [])
-            added = 0
-            for row in reader:
-                row = {k.lower().strip(): v.strip() for k, v in row.items() if k}
-                addr = row.get("address") or row.get("adress", "")
-                if not addr: continue
-                book.append({
-                    "name": row.get("name", ""), "address": addr, "phone": row.get("phone", ""),
-                    "intervention_type": row.get("intervention_type", DEFAULT_INTERVENTION_TYPE),
-                    "notes": row.get("notes", ""), "service_duration": int(row.get("service_duration", 45))*60,
-                    "visit_dates": [d.strip() for d in row.get("visit_date","").split(",") if d.strip()]
-                })
-                added += 1
-            st.session_state.address_book = book
-            AddressBookManager.set_dirty()
-            AddressBookManager.save_to_file()
-            return added, []
-        except Exception as e: return 0, [str(e)]
-
-class WaitlistManager:
-    SHEET_NAME = "Waitlist"
-
-    @staticmethod
-    def load() -> List[dict]:
-        if "waitlist" in st.session_state: return st.session_state["waitlist"]
-        conn = get_gsheets_conn()
-        if not conn: return []
-        try:
-            df = conn.read(worksheet=WaitlistManager.SHEET_NAME, ttl=0)
-            items = [{"uid": r.uid, "added_at": r.added_at, "client": json.loads(r.client_json)} for r in df.itertuples()]
-            st.session_state["waitlist"] = items
-            return items
-        except: return []
-
-    @staticmethod
-    def save():
-        conn = get_gsheets_conn()
-        if not conn: return
-        try:
-            wl = st.session_state.get("waitlist", [])
-            rows = [{"uid": i["uid"], "added_at": i["added_at"], "client_json": json.dumps(i["client"], ensure_ascii=False)} for i in wl]
-            df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["uid", "added_at", "client_json"])
-            conn.update(worksheet=WaitlistManager.SHEET_NAME, data=df
+        writer.writerow(["visit_date", "name",
