@@ -237,4 +237,141 @@ class AddressBookManager:
         contacts = st.session_state.get("address_book", [])
         output = io.StringIO()
         writer = csv.writer(output, delimiter=';')
-        writer.writerow(["visit_date", "name",
+        writer.writerow(["visit_date", "name", "address", "notes", "intervention_type", "service_duration", "phone"])
+        for c in contacts:
+            vd = ", ".join(sorted(c.get("visit_dates", []), key=_sort_key_date))
+            writer.writerow([vd, c.get("name",""), c.get("address",""), c.get("notes",""),
+                             c.get("intervention_type",""), c.get("service_duration",2700)//60, c.get("phone","")])
+        return output.getvalue().encode('utf-8-sig')
+
+    @staticmethod
+    def import_from_csv(content: str):
+        try:
+            lines = [l for l in content.splitlines() if l.strip()]
+            reader = csv.DictReader(io.StringIO("\n".join(lines)), delimiter=';' if ';' in lines[0] else ',')
+            book = st.session_state.get("address_book", [])
+            added = 0
+            for row in reader:
+                row = {k.lower().strip(): v.strip() for k, v in row.items() if k}
+                addr = row.get("address") or row.get("adress", "")
+                if not addr: continue
+                book.append({
+                    "name": row.get("name", ""), "address": addr, "phone": row.get("phone", ""),
+                    "intervention_type": row.get("intervention_type", DEFAULT_INTERVENTION_TYPE),
+                    "notes": row.get("notes", ""), "service_duration": int(row.get("service_duration", 45))*60,
+                    "visit_dates": [d.strip() for d in row.get("visit_date","").split(",") if d.strip()]
+                })
+                added += 1
+            st.session_state.address_book = book
+            AddressBookManager.set_dirty()
+            AddressBookManager.save_to_file()
+            return added, []
+        except Exception as e: return 0, [str(e)]
+
+# ==========================================================
+# WAITLIST MANAGER (GOOGLE SHEETS)
+# ==========================================================
+class WaitlistManager:
+    SHEET_NAME = "Waitlist"
+
+    @staticmethod
+    def load() -> List[dict]:
+        if "waitlist" in st.session_state: return st.session_state["waitlist"]
+        conn = get_gsheets_conn()
+        if not conn: return []
+        try:
+            df = conn.read(worksheet=WaitlistManager.SHEET_NAME, ttl=0)
+            items = [{"uid": r.uid, "added_at": r.added_at, "client": json.loads(r.client_json)} for r in df.itertuples()]
+            st.session_state["waitlist"] = items
+            return items
+        except: return []
+
+    @staticmethod
+    def save():
+        conn = get_gsheets_conn()
+        if not conn: return
+        try:
+            wl = st.session_state.get("waitlist", [])
+            rows = [{"uid": i["uid"], "added_at": i["added_at"], "client_json": json.dumps(i["client"], ensure_ascii=False)} for i in wl]
+            df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["uid", "added_at", "client_json"])
+            conn.update(worksheet=WaitlistManager.SHEET_NAME, data=df)
+        except: pass
+
+    @staticmethod
+    def add(data: dict):
+        import hashlib
+        wl = WaitlistManager.load()
+        uid = hashlib.md5(f"{data.get('address')}{datetime.now()}".encode()).hexdigest()[:12]
+        wl.append({'uid': uid, 'client': data, 'added_at': datetime.now().isoformat()})
+        WaitlistManager.save()
+
+    @staticmethod
+    def remove(uid: str):
+        wl = WaitlistManager.load()
+        st.session_state["waitlist"] = [i for i in wl if i.get('uid') != uid]
+        WaitlistManager.save()
+
+    @staticmethod
+    def sync_contact_update(on, oa, nd):
+        wl = WaitlistManager.load()
+        n, a = _norm_addr(on), _norm_addr(oa)
+        for i in wl:
+            if _norm_addr(i['client'].get('name')) == n and _norm_addr(i['client'].get('address')) == a:
+                i['client'] = dict(nd)
+        WaitlistManager.save()
+
+    @staticmethod
+    def sync_all(book):
+        wl = WaitlistManager.load()
+        bm = {(_norm_addr(c.get("name","")), _norm_addr(c.get("address",""))): c for c in book}
+        for i in wl:
+            k = (_norm_addr(i['client'].get("name","")), _norm_addr(i['client'].get("address","")))
+            if k in bm: i['client'] = dict(bm[k])
+        WaitlistManager.save()
+
+# ==========================================================
+# AUTRES MANAGERS (SANS GSHEETS)
+# ==========================================================
+class GeoCache:
+    @staticmethod
+    def load(): st.session_state.setdefault("coord_cache", {})
+    @staticmethod
+    def save(force=False): pass
+
+class OSRMCache:
+    @staticmethod
+    def load():
+        st.session_state.setdefault("_osrm_pair_dist", {})
+        st.session_state.setdefault("_osrm_pair_dur", {})
+    @staticmethod
+    def save(force=False): pass
+
+class UIPreferencesManager:
+    @staticmethod
+    def load(): return st.session_state.get("ui_prefs", {})
+    @staticmethod
+    def set(key, value):
+        if "ui_prefs" not in st.session_state: st.session_state.ui_prefs = {}
+        st.session_state.ui_prefs[key] = value
+    @staticmethod
+    def get(key, default=None): return UIPreferencesManager.load().get(key, default)
+
+class RouteManager:
+    @staticmethod
+    def autosave(): pass
+    @staticmethod
+    def save(name): return False
+    @staticmethod
+    def list_saves(): return []
+    @staticmethod
+    def load(name): return False
+    @staticmethod
+    def delete(name): return False
+    @staticmethod
+    def refresh_route_data(pts): return 0
+    @staticmethod
+    def to_ics(res, cfg, pts, dt): return ""
+
+class CacheCleaner:
+    @staticmethod
+    def clear_python_cache(): pass
