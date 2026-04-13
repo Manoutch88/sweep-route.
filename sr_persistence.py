@@ -36,8 +36,10 @@ def get_gsheets_conn():
 class HistoryManager:
     @staticmethod
     def save_to_file(): AddressBookManager.save_to_file(force=True)
+    
     @staticmethod
     def load_from_file(): return 0
+    
     @staticmethod
     def add_visit(p, date_str):
         ss = st.session_state
@@ -53,6 +55,7 @@ class HistoryManager:
                 AddressBookManager.save_to_file()
                 ContactManager.invalidate_index()
                 return
+                
     @staticmethod
     def delete_entry(address, name="", only_history=False):
         if not only_history: ContactManager.delete_contact_by_key(_norm_addr(address), _norm_addr(name))
@@ -80,6 +83,7 @@ class ContactManager:
     def invalidate_index():
         for k in ("_contact_index", "_contact_name_idx", "_contact_addr_idx", "_contact_composite_idx"):
             st.session_state.pop(k, None)
+        st.session_state.pop("_csv_cache", None)
 
     @staticmethod
     def get_index():
@@ -159,6 +163,11 @@ class ContactManager:
         AddressBookManager.save_to_file()
 
     @staticmethod
+    def get_combined_contacts():
+        book = st.session_state.get("address_book", [])
+        return [dict(c, visit_dates=c.get("visit_dates", [])) for c in book]
+
+    @staticmethod
     def get_all_cities():
         cities = set()
         for c in st.session_state.get("address_book", []):
@@ -171,7 +180,7 @@ class ContactManager:
 # ==========================================================
 class AddressBookManager:
     SHEET_NAME = "Contacts"
-    SAVE_FILE  = "carnet_adresses.json" # Pour compatibilité UI
+    SAVE_FILE  = "carnet_adresses.json"
 
     @staticmethod
     def set_dirty(): st.session_state["_book_dirty"] = True
@@ -239,6 +248,10 @@ class AddressBookManager:
         return output.getvalue().encode('utf-8-sig')
 
     @staticmethod
+    def export_to_import_csv():
+        return True, "Synchronisé avec Google Sheets"
+
+    @staticmethod
     def import_from_csv(content):
         try:
             lines = [l for l in content.splitlines() if l.strip()]
@@ -267,8 +280,8 @@ class AddressBookManager:
 # ==========================================================
 class WaitlistManager:
     SHEET_NAME = "Waitlist"
-    SNAPSHOT_DIR = "waitlist_snapshots" # Pour compatibilité UI
-    WAITLIST_FILE = "clients_en_attente.json" # Pour compatibilité UI
+    SNAPSHOT_DIR = "waitlist_snapshots"
+    WAITLIST_FILE = "clients_en_attente.json"
 
     @staticmethod
     def load():
@@ -353,7 +366,7 @@ class UIPreferencesManager:
     def get(key, default=None): return UIPreferencesManager.load().get(key, default)
 
 class RouteManager:
-    SAVE_DIR = "tournees_sauvegardees" # Pour compatibilité UI
+    SAVE_DIR = "tournees_sauvegardees"
     AUTOSAVE_NAME = "_autosave"
     @staticmethod
     def autosave(): pass
