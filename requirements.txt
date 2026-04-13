@@ -1,7 +1,8 @@
 streamlit
-pandas
-requests
-folium
-streamlit-folium
-reportlab
-urllib3
+   2 pandas
+   3 requests
+   4 folium
+   5 streamlit-folium
+   6 reportlab
+   7 urllib3
+   8 st-gsheets-connection
